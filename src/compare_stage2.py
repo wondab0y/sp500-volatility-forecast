@@ -59,18 +59,22 @@ def har_features(returns):
     return features
 
 
-def build_forecasts(daily, first_year=FIRST_YEAR):
-    dates = daily.index
-    first = dates.searchsorted(pd.Timestamp(year=first_year, month=1, day=1))
-    if first == 0 or first == len(dates):
-        raise ValueError(f"Expected training history before {first_year} and forecast origins in {first_year}")
+def scheduled_horizon_steps(dates):
     # extend the session schedule so the last origins also have a 30-day forecast
     last_end = dates[-1] + HORIZON
     calendar = xcals.get_calendar("XNYS", start=dates[0], end=last_end)
     sessions = calendar.sessions
     if not dates.equals(sessions[:len(dates)]):
         raise ValueError("Stage 1 origins must match the scheduled XNYS sessions")
-    steps = sessions.searchsorted(dates + HORIZON, side="right") - np.arange(len(dates)) - 1
+    return sessions.searchsorted(dates + HORIZON, side="right") - np.arange(len(dates)) - 1
+
+
+def build_forecasts(daily, first_year=FIRST_YEAR):
+    dates = daily.index
+    first = dates.searchsorted(pd.Timestamp(year=first_year, month=1, day=1))
+    if first == 0 or first == len(dates):
+        raise ValueError(f"Expected training history before {first_year} and forecast origins in {first_year}")
+    steps = scheduled_horizon_steps(dates)
 
     returns = daily["daily_log_return"]
     percent_returns = 100 * returns
