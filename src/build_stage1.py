@@ -14,6 +14,7 @@ START = pd.Timestamp("2006-01-01")
 END = pd.Timestamp("2026-12-31")
 SPLICE = pd.Timestamp("2018-01-02")  # first session using fred
 HORIZON = pd.Timedelta(days=30)
+ANNUALIZE = 365 / HORIZON.days
 FRED_URL = (
     "https://fred.stlouisfed.org/graph/fredgraph.csv"
     "?id=SP500&cosd=2016-11-01&coed=2026-12-31"
@@ -79,26 +80,30 @@ def realized_target(returns, cutoff):
     for origin, stop in enumerate(stops):
         if ends[origin] <= cutoff:
             # a missing return propagates through the sum for the entire window
-            variance[origin] = (365 / 30) * squared_returns[origin + 1 : stop].sum()
+            variance[origin] = ANNUALIZE * squared_returns[origin + 1 : stop].sum()
     return pd.DataFrame(
         {"realized_target_variance": variance, "target_end_date": ends}, index=sessions
     )
 
 
-def score(dataset, cutoff):
-    forecast = dataset["raw_vix_forecast_variance"]
+def qlike_loss(forecast, realized):
+    return np.log(forecast) + realized / forecast
+
+
+def score(dataset, cutoff, forecast_column="raw_vix_forecast_variance"):
+    forecast = dataset[forecast_column]
     realized = dataset["realized_target_variance"]
     scored = np.isfinite(realized) & np.isfinite(forecast) & (forecast > 0)
     forecast, realized = forecast[scored], realized[scored]
     if forecast.empty:
-        raise ValueError("No forecasts with complete targets and positive finite VIX variance")
+        raise ValueError("No forecasts with complete targets and positive finite variance")
     return pd.DataFrame([{
         "snapshot_cutoff": cutoff.date(),
         "scored_origins": len(forecast),
         "first_scored_date": forecast.index.min().date(),
         "last_scored_date": forecast.index.max().date(),
         "mae_volatility_pp": (100 * (np.sqrt(forecast) - np.sqrt(realized)).abs()).mean(),
-        "qlike": (np.log(forecast) + realized / forecast).mean(),
+        "qlike": qlike_loss(forecast, realized).mean(),
     }])
 
 
